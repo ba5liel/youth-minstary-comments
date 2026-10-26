@@ -1,0 +1,63 @@
+# Youth feedback digitiser
+
+Turns photos of handwritten (Amharic / Ge'ez) youth feedback sheets into structured text.
+Gemini reads every sheet; answers it can't read reliably go to a Telegram bot where
+reviewers type the correct text from their phones.
+
+## How sheets are triaged
+
+Each sheet is read by **two different models**. An answer goes to manual review if **any** of these hold:
+
+| Signal | Why |
+|---|---|
+| model confidence < `MIN_CONFIDENCE` | self-reported doubt |
+| `[?word?]` / `[...]` marks in the text | model was told to mark unsure words instead of guessing |
+| model says the text doesn't make sense for the question | catches fluent-looking mis-reads |
+| the two models' readings differ (< `MIN_AGREEMENT` similarity) | the strongest signal; self-confidence alone is unreliable |
+| unexpected characters | garbled output |
+| whole sheet hard to read, or text that couldn't be matched to a question | every answer on that sheet is reviewed |
+
+`SPOT_CHECK_RATE` (default 5%) of fully automatic sheets also go to review at random.
+`status` then reports how often reviewers left the AI text unchanged — your measured
+automatic accuracy. If it's too low, raise the thresholds.
+
+## Setup
+
+```bash
+uv sync
+cp .env.example .env          # add GEMINI_API_KEY, TELEGRAM_BOT_TOKEN
+# edit questions.yaml with the real questions printed on the sheet
+```
+
+## Usage
+
+```bash
+# 1. put all photos in ./images (jpg/png/heic, subfolders OK)
+uv run youth-feedback run --limit 15     # try a small batch first and look at the results
+uv run youth-feedback run                # then everything (re-running skips finished sheets)
+uv run youth-feedback extract --retry-failed
+
+# 2. review
+uv run youth-feedback bot                # keep running while reviewers work
+uv run youth-feedback status
+
+# 3. results
+uv run youth-feedback transliterate      # Latin-letter Amharic typed by reviewers -> Ge'ez
+uv run youth-feedback export             # exports/responses_wide.csv, answers_long.csv, responses.jsonl
+```
+
+`uv run youth-feedback requeue 12 57` sends sheets back to review if you spot an error.
+
+## Telegram bot
+
+1. Create a bot with @BotFather, put the token in `.env`.
+2. Each reviewer messages the bot; it replies with their Telegram ID. Add the IDs to `ADMIN_IDS` and restart.
+3. Reviewers tap **Start reviewing**. The bot sends the photo (with a full-resolution button for zooming), then each
+   flagged answer with the AI's reading. Reviewers tap **AI is correct**, **2nd reader is correct**, **Left blank**,
+   **Can't read**, or type the right text (Amharic or Latin letters). **Back** undoes the last answer.
+
+Several reviewers can work at once; each sheet is held by one person and released after `CLAIM_MINUTES` of inactivity.
+
+## Tests
+
+`uv run pytest`

@@ -1,0 +1,42 @@
+# The questionnaire printed on the paper sheets.
+# The OCR prompt uses these to map each handwritten answer to its question and
+# to judge whether an extracted answer "makes sense" for it.
+#
+#   id          stable key used in the database and exports (don't change after extracting)
+#   number      the number printed on the sheet next to the question
+#   text_am     the question exactly as printed (Amharic)
+#   text_en     English translation (optional, helps the model and the analysis)
+#   description what kind of answer is expected (optional, helps the "makes sense" check)
+#
+# TODO: replace these placeholders with the real questions.
+questions:
+  - id: q1
+    number: 1
+    text_am: "ጥያቄ 1 (እዚህ ይተኩ)"
+    text_en: "Question 1 (replace me)"
+    description: ""
+  - id: q2
+    number: 2
+    text_am: "ጥያቄ 2 (እዚህ ይተኩ)"
+    text_en: "Question 2 (replace me)"
+    description: ""
+  - id: q3
+    number: 3
+    text_am: "ጥያቄ 3 (እዚህ ይተኩ)"
+    text_en: "Question 3 (replace me)"
+    description: ""
+  - id: q4
+    number: 4
+    text_am: "ጥያቄ 4 (እዚህ ይተኩ)"
+    text_en: "Question 4 (replace me)"
+    description: ""
+  - id: q5
+    number: 5
+    text_am: "ጥያቄ 5 (እዚህ ይተኩ)"
+    text_en: "Question 5 (replace me)"
+    description: ""
+  - id: q6
+    number: 6
+    text_am: "ጥያቄ 6 (እዚህ ይተኩ)"
+    text_en: "Question 6 (replace me)"
+    description: ""
