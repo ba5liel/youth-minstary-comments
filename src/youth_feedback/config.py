@@ -36,6 +36,14 @@ class Settings:
     # Independent second reader; disagreement between the two sends an answer to review.
     # Set to "" to disable the second read (cheaper, less accurate triage).
     verify_model: str = os.getenv("VERIFY_MODEL", "gemini-3.1-pro-preview")
+    # Thinking level per reader ("" = model default, or minimal/low/medium/high).
+    # gemini-3.1-pro-preview at its default level hung for 10+ minutes on messy sheets; "low" reads them in ~10s.
+    thinking: str = os.getenv("GEMINI_THINKING", "")
+    verify_thinking: str = os.getenv("VERIFY_THINKING", "low")
+    # Cheap model that detects sideways/upside-down photos before reading.
+    orient_model: str = os.getenv("ORIENT_MODEL", "gemini-3.5-flash")
+    # Seconds before a single model call is abandoned and retried.
+    request_timeout: int = int(os.getenv("REQUEST_TIMEOUT", "240"))
     concurrency: int = int(os.getenv("CONCURRENCY", "4"))
 
     # Triage thresholds. Anything below goes to manual review.

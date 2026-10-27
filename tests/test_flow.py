@@ -65,14 +65,19 @@ def test_pipeline_bot_flow_export(tmp_path, monkeypatch):
         Image.new("RGB", (40 + i, 40), "white").save(imgs / f"s{i}.jpg")
     reads = {40: sheet(), 41: sheet(**{QIDS[1]: {"confidence": 0.4}}), 42: sheet(**{QIDS[4]: {"text": "[...] ነው"}})}
 
-    async def fake_read(jpeg, model):
+    async def fake_read(jpeg, model, thinking=""):
         import io
         w = Image.open(io.BytesIO(jpeg)).width
         s = reads[w]
         return s, s.model_dump_json()
 
     monkeypatch.setattr(pipeline, "read_sheet", fake_read)
-    monkeypatch.setattr(pipeline.settings.__class__, "spot_check_rate", 0.0, raising=False)
+
+    async def fake_rotation(variants):
+        return 0
+
+    monkeypatch.setattr(pipeline, "detect_rotation", fake_rotation)
+    object.__setattr__(pipeline.settings, "spot_check_rate", 0.0)
     conn = db.connect(tmp_path / "t.db")
     assert pipeline.ingest(conn, imgs) == (3, 3)
     assert pipeline.ingest(conn, imgs) == (0, 3)  # idempotent

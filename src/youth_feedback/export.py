@@ -47,7 +47,15 @@ def export(conn: sqlite3.Connection, out_dir: Path, include_unreviewed: bool = F
                              a["ai_confidence"], a["flags"]])
                 record["answers"][q.id] = {"text": _final(a), "source": source}
             fj.write(json.dumps(record, ensure_ascii=False) + "\n")
-    return {"wide": wide, "long": long_, "jsonl": jsonl}
+
+    other = out_dir / "other_format.csv"
+    with other.open("w", newline="", encoding="utf-8-sig") as fo:
+        wo = csv.writer(fo)
+        wo.writerow(["sheet_id", "image", "transcription", "notes"])
+        for s in conn.execute("SELECT * FROM sheets WHERE status='other_format' ORDER BY id"):
+            notes = json.loads(s["raw_primary"] or "{}").get("notes", "")
+            wo.writerow([s["id"], s["path"], s["unmapped_text"] or "", notes])
+    return {"wide": wide, "long": long_, "jsonl": jsonl, "other_format": other}
 
 
 async def transliterate_reviewed(conn: sqlite3.Connection, concurrency: int = 4) -> int:

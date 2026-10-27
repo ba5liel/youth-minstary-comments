@@ -9,11 +9,11 @@
 #   description what kind of answer is expected (helps the "makes sense" check)
 
 form_description: >-
-  One printed A4 page in Amharic. A short intro paragraph at the top asks for honest, anonymous
-  feedback about the Saturday youth program (no name required). Below it are 5 numbered bold
-  questions, each followed by blank ruled lines where the respondent handwrites the answer.
-  Respondents sometimes run past the lines, write in the margins, or continue an answer next to
-  another question's space.
+  The questions were read out or shown to the youth, and most wrote their answers on a loose piece of
+  paper or a torn notebook page: just the answers, numbered 1 to 5 (e.g. "1," "2." or a circled number),
+  usually WITHOUT the question text. Some may have used the printed questionnaire page instead, with
+  answers on the ruled lines under each bold question. Photos are often taken sideways on a blue table.
+  An answer can run over several lines until the next number. A missing number means a blank answer.
 
 questions:
   - id: q1_absence_reason

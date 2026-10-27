@@ -36,6 +36,7 @@ cp .env.example .env          # add GEMINI_API_KEY, TELEGRAM_BOT_TOKEN
 ```bash
 # 1. put all photos in ./images (jpg/png/heic, subfolders OK)
 uv run youth-feedback run --limit 15     # try a small batch first and look at the results
+uv run youth-feedback reset              # re-read unreviewed sheets after changing the prompt/models
 uv run youth-feedback run                # then everything (re-running skips finished sheets)
 uv run youth-feedback extract --retry-failed
 
@@ -54,11 +55,45 @@ uv run youth-feedback export             # exports/responses_wide.csv, answers_l
 
 1. Create a bot with @BotFather, put the token in `.env`.
 2. Each reviewer messages the bot; it replies with their Telegram ID. Add the IDs to `ADMIN_IDS` and restart.
-3. Reviewers tap **Start reviewing**. The bot sends the photo (with a full-resolution button for zooming), then each
-   flagged answer with the AI's reading. Reviewers tap **AI is correct**, **2nd reader is correct**, **Left blank**,
-   **Can't read**, or type the right text (Amharic or Latin letters). **Back** undoes the last answer.
+3. Commands:
+   - **/next** — review unclear answers. The bot sends the (auto-rotated) photo, then each flagged answer with
+     both AI readings. Tap **AI is correct** / **2nd reader is correct** / **Left blank** / **Can't read**, or type
+     the right text (Amharic or Latin letters). **Back** undoes the last answer.
+   - **/check** — double-check sheets the AI accepted automatically, least confident first. One screen shows every
+     answer; tap **All correct**, or **✏️ Q3** to fix just that answer.
+   - **/sheet 12** — open any sheet by number to see or correct it.
+   - **/stats**, **/stop**, **/reset_skips**.
 
 Several reviewers can work at once; each sheet is held by one person and released after `CLAIM_MINUTES` of inactivity.
+
+## Running on a server
+
+Any small Ubuntu/Debian VPS works. The bot uses long polling, so no domain, HTTPS, or open ports are needed.
+**Only one copy of the bot can run per token**: stop it on your laptop before starting it on the server.
+
+```bash
+# on your laptop: copy the project, photos, database and .env to the server
+rsync -avz --exclude .venv --exclude __pycache__ ./ USER@SERVER:~/youth-feedback/
+
+# on the server
+ssh USER@SERVER
+curl -LsSf https://astral.sh/uv/install.sh | sh && source ~/.local/bin/env
+cd ~/youth-feedback && uv sync --frozen
+
+bash deploy/install-bot-service.sh          # bot runs now and after every reboot/crash
+journalctl -u youth-feedback-bot -f         # live logs (Ctrl+C to leave)
+
+# read all the sheets in the background (survives closing SSH); takes a while for 135 photos
+nohup uv run youth-feedback run > extract.log 2>&1 &
+tail -f extract.log
+uv run youth-feedback extract --retry-failed   # afterwards, if any failed
+uv run youth-feedback status
+```
+
+Later: `uv run youth-feedback transliterate && uv run youth-feedback export`, then copy the results back with
+`rsync -avz USER@SERVER:~/youth-feedback/exports/ ./exports/`.
+
+After changing code or `.env`: `sudo systemctl restart youth-feedback-bot`.
 
 ## Tests
 

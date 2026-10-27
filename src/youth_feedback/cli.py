@@ -12,6 +12,7 @@ from rich.table import Table
 from . import db
 from .config import questions, settings
 
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 app = typer.Typer(help="Digitise handwritten youth feedback sheets.", no_args_is_help=True)
 console = Console()
 
@@ -57,7 +58,7 @@ def status():
     conn = db.connect()
     c = db.counts(conn)
     t = Table("status", "sheets")
-    for k in ("pending", "auto_ok", "needs_review", "reviewed", "failed", "not_a_sheet"):
+    for k in ("pending", "auto_ok", "needs_review", "reviewed", "failed", "other_format"):
         t.add_row(k, str(c.get(k, 0)))
     t.add_row("[bold]total", f"[bold]{sum(c.values())}")
     console.print(t)
@@ -90,6 +91,27 @@ def requeue(sheet_ids: list[int] = typer.Argument(..., help="Sheet ids to send b
                 "UPDATE sheets SET status='needs_review', claimed_by=NULL, claimed_at=NULL, updated_at=? WHERE id=?",
                 (db.now(), sid))
     console.print(f"Requeued {len(sheet_ids)} sheet(s).")
+
+
+@app.command()
+def reset(
+    sheet_ids: list[int] = typer.Argument(None, help="Sheet ids to read again (default: every unreviewed sheet)"),
+    force: bool = typer.Option(False, help="Also reset sheets a human already reviewed (discards their work)"),
+):
+    """Put sheets back to 'pending' so `extract` reads them again (e.g. after changing the prompt)."""
+    conn = db.connect()
+    keep = () if force else ("reviewed",)
+    where = "id IN (%s)" % ",".join("?" * len(sheet_ids)) if sheet_ids else "1=1"
+    if keep:
+        where += " AND status NOT IN (%s)" % ",".join("?" * len(keep))
+    with db.tx(conn):
+        ids = [r[0] for r in conn.execute(f"SELECT id FROM sheets WHERE {where} AND status!='pending'",
+                                          (*(sheet_ids or []), *keep))]
+        for sid in ids:
+            conn.execute("DELETE FROM answers WHERE sheet_id=?", (sid,))
+            conn.execute("""UPDATE sheets SET status='pending', error=NULL, spot_check=0, claimed_by=NULL,
+                            claimed_at=NULL, updated_at=? WHERE id=?""", (db.now(), sid))
+    console.print(f"Reset {len(ids)} sheet(s) to pending.")
 
 
 @app.command()

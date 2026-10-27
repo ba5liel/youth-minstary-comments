@@ -83,7 +83,7 @@ async def show_next(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     if ud.get("sheet") != sheet["id"]:
         ud["sheet"], ud["history"] = sheet["id"], []
-        jpeg = await asyncio.to_thread(to_jpeg, sheet_path(sheet), 2048, 85)
+        jpeg = await asyncio.to_thread(to_jpeg, sheet_path(sheet), 2048, 85, sheet["rotation"])
         caption = f"📄 <b>Sheet #{sheet['id']}</b> · {_remaining(conn)} sheet(s) waiting"
         if sheet["unmapped_text"]:
             caption += ("\n\n<b>Text the AI could not place:</b>\n"
@@ -101,6 +101,12 @@ async def ask_current(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     conn, ud, uid = _conn(ctx), ctx.user_data, update.effective_user.id
     sheet_id = ud["sheet"]
     pending = db.pending_answers(conn, sheet_id)
+    if not pending and ud.get("return_to") == sheet_id:
+        ud.pop("return_to")
+        ud.pop("sheet", None)
+        ud.pop("current_q", None)
+        await show_overview(update, ctx, sheet_id)
+        return
     if not pending:
         if db.finish_sheet_if_done(conn, sheet_id, uid):
             await update.effective_chat.send_message(f"✅ Sheet #{sheet_id} saved.")
@@ -124,6 +130,9 @@ async def ask_current(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "🤖 <b>AI read:</b>",
         f"<code>{html.escape(_clip(a['ai_text'], 1500))}</code>" if a["ai_text"] else "<i>(nothing)</i>",
     ]
+    saved = a["final_text"]
+    if saved is not None and saved != a["ai_text"]:
+        lines += ["💾 <b>Saved answer:</b>", f"<code>{html.escape(_clip(saved, 1200))}</code>" if saved else "<i>(blank)</i>"]
     alt = a["verify_text"]
     show_alt = bool(alt) and alt.strip() != a["ai_text"].strip()
     if show_alt:
@@ -135,6 +144,8 @@ async def ask_current(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     key = f"{sheet_id}:{a['question_id']}"
     rows = []
+    if saved is not None and saved != a["ai_text"]:
+        rows.append([InlineKeyboardButton("✅ Saved answer is correct", callback_data=f"saved:{key}")])
     if a["ai_text"]:
         rows.append([InlineKeyboardButton("✅ AI is correct", callback_data=f"keep:{key}")])
     if show_alt:
@@ -143,7 +154,10 @@ async def ask_current(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         InlineKeyboardButton("⬜ Left blank", callback_data=f"blank:{key}"),
         InlineKeyboardButton("❓ Can't read", callback_data=f"unread:{key}"),
     ])
-    nav = [InlineKeyboardButton("⏭ Skip sheet", callback_data=f"skip:{sheet_id}")]
+    if ud.get("return_to") == sheet_id:
+        nav = [InlineKeyboardButton("↩️ Cancel", callback_data=f"cancel:{key}")]
+    else:
+        nav = [InlineKeyboardButton("⏭ Skip sheet", callback_data=f"skip:{sheet_id}")]
     if ud.get("history"):
         nav.insert(0, InlineKeyboardButton("⬅️ Back", callback_data=f"back:{sheet_id}"))
     rows.append(nav)
@@ -151,6 +165,67 @@ async def ask_current(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_chat.send_message(
         "\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows)
     )
+
+
+async def show_auto(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Next automatically accepted sheet for a human to double-check."""
+    conn, ud, uid = _conn(ctx), ctx.user_data, update.effective_user.id
+    sheet = db.claim_next_auto(conn, uid, ud.setdefault("auto_skipped", set()))
+    if sheet is None:
+        await update.effective_chat.send_message(
+            "🎉 Every automatically accepted sheet has been checked." if not ud["auto_skipped"] else
+            f"No more unchecked sheets (you passed on {len(ud['auto_skipped'])}; /reset_skips to see them again)."
+        )
+        return
+    await show_overview(update, ctx, sheet["id"], send_photo=True)
+
+
+async def show_overview(update: Update, ctx: ContextTypes.DEFAULT_TYPE, sheet_id: int,
+                        send_photo: bool = False) -> None:
+    """Photo + every answer on one screen, with buttons to confirm all or fix a single answer."""
+    conn, chat = _conn(ctx), update.effective_chat
+    sheet = conn.execute("SELECT * FROM sheets WHERE id=?", (sheet_id,)).fetchone()
+    if sheet is None:
+        await chat.send_message(f"There is no sheet #{sheet_id}.")
+        return
+    if sheet["status"] in ("pending", "failed"):
+        await chat.send_message(f"Sheet #{sheet_id} has not been read by the AI yet ({sheet['status']}).")
+        return
+    ctx.user_data["auto_sheet"] = sheet_id
+
+    if send_photo:
+        jpeg = await asyncio.to_thread(to_jpeg, sheet_path(sheet), 2048, 85, sheet["rotation"])
+        unchecked = db.counts(conn).get("auto_ok", 0)
+        await chat.send_photo(jpeg, caption=f"📄 <b>Sheet #{sheet_id}</b> · {unchecked} accepted sheet(s) not yet checked",
+                              parse_mode=ParseMode.HTML)
+
+    if sheet["status"] == "other_format":
+        await chat.send_message(
+            f"📝 Sheet #{sheet_id} is not in the 1-5 answer format. Full text:\n\n"
+            f"<code>{html.escape(_clip(sheet['unmapped_text'] or '', 3500))}</code>", parse_mode=ParseMode.HTML)
+        return
+    if sheet["status"] == "needs_review":
+        await chat.send_message(f"Sheet #{sheet_id} is in the review queue - use /next to review it.")
+        return
+
+    qs = question_map()
+    answers = db.answers_for(conn, sheet_id)
+    status = {"auto_ok": "🤖 accepted automatically", "reviewed": "✔️ checked by a person"}.get(sheet["status"], sheet["status"])
+    lines = [f"<b>Sheet #{sheet_id}</b> · {status}", ""]
+    fix_buttons = []
+    for a in answers:
+        q = qs.get(a["question_id"])
+        num = q.number if q else "?"
+        text = a["final_text"] if a["final_text"] is not None else a["ai_text"]
+        mark = "✔️" if a["status"] == "reviewed" else "🤖"
+        lines.append(f"<b>Q{num}.</b> {mark} " + (f"<code>{html.escape(_clip(text, 600))}</code>" if text else "<i>(blank)</i>"))
+        fix_buttons.append(InlineKeyboardButton(f"✏️ Q{num}", callback_data=f"efix:{sheet_id}:{a['question_id']}"))
+    lines += ["", "Compare with the photo. Tap <b>All correct</b>, or the question you need to fix."]
+
+    rows = [[InlineKeyboardButton("✅ All correct", callback_data=f"aok:{sheet_id}")], fix_buttons,
+            [InlineKeyboardButton("🔍 Full resolution", callback_data=f"full:{sheet_id}"),
+             InlineKeyboardButton("⏭ Next sheet", callback_data=f"anext:{sheet_id}")]]
+    await chat.send_message("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def _record(update: Update, ctx: ContextTypes.DEFAULT_TYPE, text: str, script: str,
@@ -177,13 +252,30 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         f"👀 Waiting for review: {c.get('needs_review', 0)}\n"
         f"✔️ Reviewed: {c.get('reviewed', 0)}"
     )
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Start reviewing", callback_data="next")]])
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("▶️ Review unclear answers", callback_data="next")],
+        [InlineKeyboardButton(f"🔎 Check accepted sheets ({c.get('auto_ok', 0)})", callback_data="check")],
+    ])
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 
 async def cmd_next(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if await _authorized(update):
         await show_next(update, ctx)
+
+
+async def cmd_check(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if await _authorized(update):
+        await show_auto(update, ctx)
+
+
+async def cmd_sheet(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update):
+        return
+    if not ctx.args or not ctx.args[0].lstrip("#").isdigit():
+        await update.effective_message.reply_text("Usage: /sheet 12")
+        return
+    await show_overview(update, ctx, int(ctx.args[0].lstrip("#")), send_photo=True)
 
 
 async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -211,6 +303,7 @@ async def cmd_reset_skips(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
     if not await _authorized(update):
         return
     ctx.user_data["skipped"] = set()
+    ctx.user_data["auto_skipped"] = set()
     await update.effective_message.reply_text("Skipped sheets are back in your queue. /next")
 
 
@@ -231,16 +324,40 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     conn, ud, uid = _conn(ctx), ctx.user_data, update.effective_user.id
     action, _, rest = query.data.partition(":")
 
-    if action in ("next", "full"):
+    if action in ("next", "full", "check"):
         await query.answer()
     if action == "next":
         await show_next(update, ctx)
+        return
+    if action == "check":
+        await show_auto(update, ctx)
+        return
+
+    if action in ("aok", "anext", "efix"):
+        sheet_id = int(rest.split(":")[0])
+        if sheet_id != ud.get("auto_sheet") or ud.get("sheet"):
+            await query.answer("Finish the current answer first, or that button is from an earlier sheet.")
+            return
+        await query.answer()
+        if action == "aok":
+            db.confirm_sheet(conn, sheet_id, uid)
+            await update.effective_chat.send_message(f"✅ Sheet #{sheet_id} confirmed.")
+            await show_auto(update, ctx)
+        elif action == "anext":
+            ud.setdefault("auto_skipped", set()).add(sheet_id)
+            db.release(conn, sheet_id, uid)
+            await show_auto(update, ctx)
+        else:
+            qid = rest.split(":", 1)[1]
+            db.open_answer(conn, sheet_id, qid)
+            ud.update(sheet=sheet_id, history=[], return_to=sheet_id)
+            await ask_current(update, ctx)
         return
 
     if action == "full":
         row = conn.execute("SELECT * FROM sheets WHERE id=?", (int(rest),)).fetchone()
         if row:
-            jpeg = await asyncio.to_thread(to_jpeg, sheet_path(row), 4096, 92)
+            jpeg = await asyncio.to_thread(to_jpeg, sheet_path(row), 4096, 92, row["rotation"])
             await update.effective_chat.send_document(
                 InputFile(jpeg, filename=f"sheet-{row['id']}.jpg"), caption="Open and zoom in 🔍"
             )
@@ -254,6 +371,18 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
     if action in ("skip", "back"):
         await query.answer()
+    if action == "cancel":
+        # Leave the answer as it was before the reviewer tapped ✏️ (its status comes back with the text).
+        await query.answer()
+        qid = rest.split(":", 1)[1]
+        ans = conn.execute("SELECT * FROM answers WHERE sheet_id=? AND question_id=?", (sheet_id, qid)).fetchone()
+        status = "reviewed" if ans["reviewed_by"] else "auto_ok"
+        conn.execute("UPDATE answers SET status=? WHERE sheet_id=? AND question_id=?", (status, sheet_id, qid))
+        ud.pop("return_to", None)
+        ud.pop("sheet", None)
+        ud.pop("current_q", None)
+        await show_overview(update, ctx, sheet_id)
+        return
     if action == "skip":
         ud.setdefault("skipped", set()).add(sheet_id)
         db.release(conn, sheet_id, uid)
@@ -277,6 +406,8 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     ans = conn.execute("SELECT * FROM answers WHERE sheet_id=? AND question_id=?", (sheet_id, qid)).fetchone()
     if action == "keep":
         await _record(update, ctx, ans["ai_text"], script_of(ans["ai_text"]))
+    elif action == "saved":
+        await _record(update, ctx, ans["final_text"], script_of(ans["final_text"]), ans["reviewer_raw"])
     elif action == "alt":
         await _record(update, ctx, ans["verify_text"], script_of(ans["verify_text"]))
     elif action == "blank":
@@ -293,7 +424,9 @@ async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def _post_init(app: Application) -> None:
     await app.bot.set_my_commands([
-        BotCommand("next", "Review the next sheet"),
+        BotCommand("next", "Review unclear answers"),
+        BotCommand("check", "Double-check sheets the AI accepted"),
+        BotCommand("sheet", "Open a sheet by number, e.g. /sheet 12"),
         BotCommand("stats", "Progress"),
         BotCommand("stop", "Pause reviewing"),
         BotCommand("reset_skips", "Show skipped sheets again"),
@@ -312,6 +445,8 @@ def run() -> None:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("next", cmd_next))
     app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("check", cmd_check))
+    app.add_handler(CommandHandler("sheet", cmd_sheet))
     app.add_handler(CommandHandler("stop", cmd_stop))
     app.add_handler(CommandHandler("reset_skips", cmd_reset_skips))
     app.add_handler(CallbackQueryHandler(on_button))

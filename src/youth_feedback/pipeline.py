@@ -11,8 +11,8 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, T
 
 from . import db
 from .config import ROOT, settings
-from .images import find_images, sha256, to_jpeg
-from .ocr import SheetRead, read_sheet
+from .images import find_images, rotations, sha256, to_jpeg
+from .ocr import SheetRead, detect_rotation, read_sheet
 from .triage import judge, script_of
 
 
@@ -36,10 +36,11 @@ def _store(conn: sqlite3.Connection, sheet_id: int, primary: SheetRead, raw_p: s
     if not primary.is_response_sheet:
         with db.tx(conn):
             conn.execute(
-                "UPDATE sheets SET status='not_a_sheet', raw_primary=?, raw_verify=?, updated_at=? WHERE id=?",
-                (raw_p, raw_v, db.now(), sheet_id),
+                """UPDATE sheets SET status='other_format', legibility=?, unmapped_text=?, raw_primary=?,
+                                     raw_verify=?, updated_at=? WHERE id=?""",
+                (primary.legibility, primary.unmapped_text, raw_p, raw_v, db.now(), sheet_id),
             )
-        return "not_a_sheet"
+        return "other_format"
 
     verdict = judge(primary, verify)
     spot = not verdict.needs_review and random.random() < settings.spot_check_rate
@@ -75,10 +76,12 @@ def _store(conn: sqlite3.Connection, sheet_id: int, primary: SheetRead, raw_p: s
 async def _process(conn: sqlite3.Connection, row: sqlite3.Row, sem: asyncio.Semaphore) -> str:
     async with sem:
         try:
-            jpeg = await asyncio.to_thread(to_jpeg, sheet_path(row), 3072)
-            jobs = [read_sheet(jpeg, settings.model)]
+            rotation = await detect_rotation(await asyncio.to_thread(rotations, sheet_path(row)))
+            conn.execute("UPDATE sheets SET rotation=? WHERE id=?", (rotation, row["id"]))
+            jpeg = await asyncio.to_thread(to_jpeg, sheet_path(row), 3072, 90, rotation)
+            jobs = [read_sheet(jpeg, settings.model, settings.thinking)]
             if settings.verify_model:
-                jobs.append(read_sheet(jpeg, settings.verify_model))
+                jobs.append(read_sheet(jpeg, settings.verify_model, settings.verify_thinking))
             results = await asyncio.gather(*jobs)
             primary, raw_p = results[0]
             verify, raw_v = results[1] if len(results) > 1 else (None, None)

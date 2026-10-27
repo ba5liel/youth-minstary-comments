@@ -26,10 +26,26 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def to_jpeg(path: Path, max_side: int, quality: int = 90) -> bytes:
-    """Upright, RGB, at most `max_side` pixels on the long edge."""
+def rotations(path: Path, max_side: int = 768) -> list[tuple[int, bytes]]:
+    """The photo turned 0/90/180/270 degrees clockwise, small, for orientation detection."""
+    base = Image.open(io.BytesIO(to_jpeg(path, max_side, 80)))
+    out = []
+    for rot in (0, 90, 180, 270):
+        buf = io.BytesIO()
+        base.rotate(-rot, expand=True).save(buf, "JPEG", quality=80)
+        out.append((rot, buf.getvalue()))
+    return out
+
+
+def to_jpeg(path: Path, max_side: int, quality: int = 90, rotate: int = 0) -> bytes:
+    """RGB, at most `max_side` pixels on the long edge, turned `rotate` degrees clockwise.
+
+    EXIF orientation is applied first; `rotate` fixes paper that was photographed sideways.
+    """
     with Image.open(path) as im:
         im = ImageOps.exif_transpose(im).convert("RGB")
+        if rotate % 360:
+            im = im.rotate(-rotate, expand=True)
         im.thumbnail((max_side, max_side), Image.LANCZOS)
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=quality, optimize=True)

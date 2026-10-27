@@ -34,6 +34,7 @@ REASONS = {
     "sheet_unclear": "whole sheet is hard to read",
     "unmapped_text": "some text could not be placed",
     "spot_check": "random quality check",
+    "manual_check": "opened by a reviewer for correction",
 }
 
 

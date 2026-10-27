@@ -12,7 +12,8 @@ from typing import Iterator
 from .config import questions, settings
 
 # Sheet status lifecycle:
-#   pending -> auto_ok | needs_review | failed | not_a_sheet
+#   pending -> auto_ok | needs_review | failed | other_format
+#   (other_format: real feedback, but not answers numbered 1-5; full text kept in unmapped_text)
 #   needs_review -> reviewed
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sheets (
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS sheets (
     status        TEXT NOT NULL DEFAULT 'pending',
     error         TEXT,
     spot_check    INTEGER NOT NULL DEFAULT 0,
+    rotation      INTEGER NOT NULL DEFAULT 0,  -- degrees clockwise to make the text upright
     legibility    REAL,
     sheet_flags   TEXT NOT NULL DEFAULT '[]',
     unmapped_text TEXT,
@@ -70,7 +72,15 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=30000")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(sheets)")}
+    if "rotation" not in cols:
+        conn.execute("ALTER TABLE sheets ADD COLUMN rotation INTEGER NOT NULL DEFAULT 0")
+    conn.execute("UPDATE sheets SET status='other_format' WHERE status='not_a_sheet'")
 
 
 @contextmanager
@@ -180,3 +190,55 @@ def finish_sheet_if_done(conn: sqlite3.Connection, sheet_id: int, user_id: int) 
 
 def dumps(v) -> str:
     return json.dumps(v, ensure_ascii=False)
+
+
+# ---------- checking automatically accepted sheets ----------
+
+def claim_next_auto(conn: sqlite3.Connection, user_id: int, exclude: set[int] = frozenset()) -> sqlite3.Row | None:
+    """Next auto-accepted sheet nobody has checked yet, least confident first."""
+    stale = (datetime.now(timezone.utc) - timedelta(minutes=settings.claim_minutes)).isoformat(timespec="seconds")
+    exclude = tuple(exclude) or (-1,)
+    with tx(conn):
+        row = conn.execute(
+            f"""SELECT s.* FROM sheets s
+                WHERE s.status='auto_ok'
+                  AND (s.claimed_by IS NULL OR s.claimed_by=? OR s.claimed_at < ?)
+                  AND s.id NOT IN ({",".join("?" * len(exclude))})
+                ORDER BY (SELECT MIN(COALESCE(a.ai_confidence, 0)) FROM answers a
+                          WHERE a.sheet_id=s.id AND a.ai_blank=0), s.id
+                LIMIT 1""",
+            (user_id, stale, *exclude),
+        ).fetchone()
+        if row:
+            conn.execute("UPDATE sheets SET claimed_by=?, claimed_at=? WHERE id=?", (user_id, now(), row["id"]))
+        return row
+
+
+def confirm_sheet(conn: sqlite3.Connection, sheet_id: int, user_id: int) -> None:
+    """A human looked at every answer on the sheet and it is correct as shown."""
+    ts = now()
+    with tx(conn):
+        conn.execute(
+            """UPDATE answers SET status='reviewed', final_text=COALESCE(final_text, ai_text),
+                                  final_script=COALESCE(final_script, 'none'),
+                                  reviewer_raw=COALESCE(reviewer_raw, ai_text),
+                                  reviewed_by=COALESCE(reviewed_by, ?), reviewed_at=COALESCE(reviewed_at, ?)
+               WHERE sheet_id=?""",
+            (user_id, ts, sheet_id),
+        )
+        conn.execute(
+            """UPDATE sheets SET status='reviewed', reviewed_by=?, reviewed_at=?, claimed_by=NULL,
+                                 claimed_at=NULL, updated_at=? WHERE id=?""",
+            (user_id, ts, ts, sheet_id),
+        )
+
+
+def open_answer(conn: sqlite3.Connection, sheet_id: int, question_id: str) -> None:
+    """Send one answer of an already accepted/reviewed sheet back for correction. Its current text is kept."""
+    conn.execute(
+        """UPDATE answers SET status='needs_review',
+                  flags=CASE WHEN flags LIKE '%manual_check%' THEN flags
+                             ELSE json_insert(flags, '$[#]', 'manual_check') END
+           WHERE sheet_id=? AND question_id=?""",
+        (sheet_id, question_id),
+    )
