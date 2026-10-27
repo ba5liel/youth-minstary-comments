@@ -7,7 +7,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from .config import Question, questions, settings
+from .config import Question, form_description, questions, settings
 
 
 class AnswerRead(BaseModel):
@@ -52,6 +52,8 @@ Accuracy matters more than completeness: a wrong guess is worse than an honest "
 
 Rules:
 1. Transcribe VERBATIM. Do not correct spelling, grammar or punctuation. Do not translate, summarise or paraphrase.
+   Never swap a word for a more common spelling, synonym or "better" form (e.g. if ትናንሽ is written,
+   do not write ትንንሽ; if ስለምገባ is written, do not write ስለገባኝ). Write exactly the letters on the page.
 2. Keep the writer's script: Ge'ez stays Ge'ez, English stays English, mixed stays mixed.
    Pay close attention to Fidel vowel orders (e.g. ለ ሉ ሊ ላ ሌ ል ሎ) and look-alike characters
    (ሀ/ሐ/ኀ, ሰ/ሠ, አ/ዐ, ጸ/ፀ, ቸ/ቼ, ዉ/ው); transcribe the form actually written.
@@ -68,7 +70,8 @@ Rules:
 
 
 def build_prompt() -> str:
-    return f"The questionnaire has these questions:\n{_question_block(questions())}\n\nTranscribe the sheet in the image."
+    form = f"About the form: {form_description()}\n\n" if form_description() else ""
+    return f"{form}The questionnaire has these questions:\n{_question_block(questions())}\n\nTranscribe the sheet in the image."
 
 
 _client: genai.Client | None = None

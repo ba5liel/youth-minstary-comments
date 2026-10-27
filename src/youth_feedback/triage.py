@@ -46,8 +46,16 @@ def script_of(text: str) -> str:
     return "geez" if ge else "latin"
 
 
+# Fidel series that are pronounced the same and used interchangeably in everyday writing
+# (ሐ/ኀ -> ሀ, ሠ -> ሰ, ዐ -> አ, ፀ -> ጸ). Used only when comparing readings, never on stored text.
+_HOMOPHONES = {}
+for src, dst in ((0x1210, 0x1200), (0x1280, 0x1200), (0x1220, 0x1230), (0x12D0, 0x12A0), (0x1340, 0x1338)):
+    for order in range(7):
+        _HOMOPHONES[src + order] = dst + order
+
+
 def normalize(text: str) -> str:
-    text = UNCERTAIN.sub(" ", unicodedata.normalize("NFC", text))
+    text = UNCERTAIN.sub(" ", unicodedata.normalize("NFC", text)).translate(_HOMOPHONES)
     text = re.sub(r"[\s፡።፣፤፥፦፧፨.,;:!?\"'()\-]+", " ", text)
     return text.strip().lower()
 

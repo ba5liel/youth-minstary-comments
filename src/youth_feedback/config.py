@@ -32,15 +32,15 @@ class Settings:
 
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     # Primary reader: use the strongest vision model you have access to.
-    model: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+    model: str = os.getenv("GEMINI_MODEL", "gemini-4-argon")
     # Independent second reader; disagreement between the two sends an answer to review.
     # Set to "" to disable the second read (cheaper, less accurate triage).
-    verify_model: str = os.getenv("VERIFY_MODEL", "gemini-3.1-flash-lite")
+    verify_model: str = os.getenv("VERIFY_MODEL", "gemini-3.1-pro-preview")
     concurrency: int = int(os.getenv("CONCURRENCY", "4"))
 
     # Triage thresholds. Anything below goes to manual review.
     min_confidence: float = _float("MIN_CONFIDENCE", 0.85)
-    min_agreement: float = _float("MIN_AGREEMENT", 0.85)
+    min_agreement: float = _float("MIN_AGREEMENT", 1.0)
     min_legibility: float = _float("MIN_LEGIBILITY", 0.6)
     # Fraction of fully-automatic sheets randomly sent to review anyway,
     # so you can measure how accurate the automatic results really are.
@@ -68,8 +68,17 @@ class Question:
 
 
 @cache
+def _questionnaire() -> dict:
+    return yaml.safe_load(settings.questions_path.read_text(encoding="utf-8"))
+
+
+def form_description() -> str:
+    return (_questionnaire().get("form_description") or "").strip()
+
+
+@cache
 def questions() -> list[Question]:
-    data = yaml.safe_load(settings.questions_path.read_text(encoding="utf-8"))
+    data = _questionnaire()
     qs = [Question(**{k: (v or "") if k != "number" else v for k, v in q.items()}) for q in data["questions"]]
     ids = [q.id for q in qs]
     if len(set(ids)) != len(ids):

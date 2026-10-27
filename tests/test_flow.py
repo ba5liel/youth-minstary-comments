@@ -5,11 +5,12 @@ import pytest
 from PIL import Image
 
 from youth_feedback import db, pipeline
+from youth_feedback.config import questions
 from youth_feedback.export import export, spot_check_accuracy
 from youth_feedback.ocr import AnswerRead, SheetRead
 from youth_feedback.triage import judge, script_of, similarity
 
-QIDS = ["q1", "q2", "q3", "q4", "q5", "q6"]
+QIDS = [q.id for q in questions()]
 
 
 def sheet(**over):
@@ -26,21 +27,21 @@ def test_clean_sheet_is_auto():
 
 
 @pytest.mark.parametrize("over,flag", [
-    ({"q2": {"confidence": 0.5}}, "low_confidence"),
-    ({"q2": {"text": "ፕሮግራሙ [?ጥሩ?] ነው"}}, "uncertain_words"),
-    ({"q2": {"makes_sense": False}}, "not_sensible"),
-    ({"q2": {"text": "ፕሮግራሙ ጥሩ ነው ☃"}}, "odd_characters"),
+    ({QIDS[1]: {"confidence": 0.5}}, "low_confidence"),
+    ({QIDS[1]: {"text": "ፕሮግራሙ [?ጥሩ?] ነው"}}, "uncertain_words"),
+    ({QIDS[1]: {"makes_sense": False}}, "not_sensible"),
+    ({QIDS[1]: {"text": "ፕሮግራሙ ጥሩ ነው ☃"}}, "odd_characters"),
 ])
 def test_flags(over, flag):
     v = judge(sheet(**over), sheet())
-    q2 = next(a for a in v.answers if a.question_id == "q2")
+    q2 = next(a for a in v.answers if a.question_id == QIDS[1])
     assert flag in q2.flags
-    assert all(not a.flags for a in v.answers if a.question_id != "q2")
+    assert all(not a.flags for a in v.answers if a.question_id != QIDS[1])
 
 
 def test_disagreement_and_missing():
-    v = judge(sheet(), sheet(q3={"text": "መዝሙሩ ይበዛል በጣም"}))
-    assert "disagreement" in next(a for a in v.answers if a.question_id == "q3").flags
+    v = judge(sheet(), sheet(**{QIDS[2]: {"text": "መዝሙሩ ይበዛል በጣም"}}))
+    assert "disagreement" in next(a for a in v.answers if a.question_id == QIDS[2]).flags
     p = sheet()
     p.answers.pop()
     assert "missing" in judge(p, None).answers[-1].flags
@@ -62,7 +63,7 @@ def test_pipeline_bot_flow_export(tmp_path, monkeypatch):
     imgs.mkdir()
     for i in range(3):
         Image.new("RGB", (40 + i, 40), "white").save(imgs / f"s{i}.jpg")
-    reads = {40: sheet(), 41: sheet(q2={"confidence": 0.4}), 42: sheet(q5={"text": "[...] ነው"})}
+    reads = {40: sheet(), 41: sheet(**{QIDS[1]: {"confidence": 0.4}}), 42: sheet(**{QIDS[4]: {"text": "[...] ነው"}})}
 
     async def fake_read(jpeg, model):
         import io
@@ -97,3 +98,13 @@ def test_pipeline_bot_flow_export(tmp_path, monkeypatch):
     texts = [ans["text"] for r in rows for ans in r["answers"].values()]
     assert "selam new" in texts
     assert spot_check_accuracy(conn) == (0, 0)
+
+
+def test_one_letter_difference_needs_review():
+    v = judge(sheet(**{QIDS[4]: {"text": "Mentorship program አጀምራለሁ"}}),
+              sheet(**{QIDS[4]: {"text": "Mentorship Program እጀምራለሁ።"}}))
+    assert "disagreement" in v.answers[4].flags
+
+
+def test_homophones_and_punctuation_agree():
+    assert similarity("ሐሳብ ጸሎት ::", "ሀሳብ ፀሎት።") == 1.0

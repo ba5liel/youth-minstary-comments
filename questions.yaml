@@ -1,42 +1,43 @@
-# The questionnaire printed on the paper sheets.
+# The questionnaire printed on the paper sheets ("Youth Ministry Transformation Survey").
 # The OCR prompt uses these to map each handwritten answer to its question and
 # to judge whether an extracted answer "makes sense" for it.
 #
 #   id          stable key used in the database and exports (don't change after extracting)
 #   number      the number printed on the sheet next to the question
 #   text_am     the question exactly as printed (Amharic)
-#   text_en     English translation (optional, helps the model and the analysis)
-#   description what kind of answer is expected (optional, helps the "makes sense" check)
-#
-# TODO: replace these placeholders with the real questions.
+#   text_en     English translation (helps the model and the analysis)
+#   description what kind of answer is expected (helps the "makes sense" check)
+
+form_description: >-
+  One printed A4 page in Amharic. A short intro paragraph at the top asks for honest, anonymous
+  feedback about the Saturday youth program (no name required). Below it are 5 numbered bold
+  questions, each followed by blank ruled lines where the respondent handwrites the answer.
+  Respondents sometimes run past the lines, write in the margins, or continue an answer next to
+  another question's space.
+
 questions:
-  - id: q1
+  - id: q1_absence_reason
     number: 1
-    text_am: "ጥያቄ 1 (እዚህ ይተኩ)"
-    text_en: "Question 1 (replace me)"
-    description: ""
-  - id: q2
+    text_am: "በግልጽ እንነጋገር፤ ቅዳሜ ፕሮግራም ላይ አብዛኛውን ጊዜ የማትገኘው/ኚው በዋናነት ለምንድን ነው?"
+    text_en: "Let's be honest: what is the main reason you usually don't attend the Saturday program?"
+    description: "Reasons for not attending (e.g. time, work/school, distance, program not engaging, relationships). May also say they do attend."
+  - id: q2_program_structure
     number: 2
-    text_am: "ጥያቄ 2 (እዚህ ይተኩ)"
-    text_en: "Question 2 (replace me)"
-    description: ""
-  - id: q3
+    text_am: "አሁን ያለውን የፕሮግራም ቅርፅ (Structure) ቢሻሻል፣ ምን አይነት አቀራረብ ብንጠቀም ይሻላል?"
+    text_en: "If the current program structure were improved, what kind of approach should we use?"
+    description: "Suggestions on format: worship, teaching, discussion, small groups, timing, activities, etc."
+  - id: q3_topics_relevance
     number: 3
-    text_am: "ጥያቄ 3 (እዚህ ይተኩ)"
-    text_en: "Question 3 (replace me)"
-    description: ""
-  - id: q4
+    text_am: "አሁን የምንማራቸው እና የምንፀልያቸው ርዕሶች ከህይወትህ/ሽ ጋር ይገናኛሉ? ካልሆነ፣ በትክክል የቱ ላይ ትኩረት ብናደርግ ትወዳለህ/ሽ?"
+    text_en: "Do the topics we currently teach and pray about relate to your life? If not, what exactly would you like us to focus on?"
+    description: "Yes/no on relevance, and/or topics they want (e.g. relationships, purpose, career, faith questions)."
+  - id: q4_leaders_fix_stop_start
     number: 4
-    text_am: "ጥያቄ 4 (እዚህ ይተኩ)"
-    text_en: "Question 4 (replace me)"
-    description: ""
-  - id: q5
+    text_am: "የወጣቶች መሪዎች ምን እንድናስተካክል፣ እንድንተው ወይም አዲስ እንድንጀምር ትፈልጋለህ/ሽ?"
+    text_en: "As youth leaders, what would you like us to fix, stop doing, or start new?"
+    description: "Feedback to leaders: things to fix, stop, or start."
+  - id: q5_if_you_were_leader
     number: 5
-    text_am: "ጥያቄ 5 (እዚህ ይተኩ)"
-    text_en: "Question 5 (replace me)"
-    description: ""
-  - id: q6
-    number: 6
-    text_am: "ጥያቄ 6 (እዚህ ይተኩ)"
-    text_en: "Question 6 (replace me)"
-    description: ""
+    text_am: "አንተ/አንቺ የዚህ የወጣቶች ህብረት መሪ ብትሆን/ኚ፣ መጀመሪያ የምትቀይረው/ሪው ወይም የምታሻሽለው/ሊው ነገር ምንድን ነው?"
+    text_en: "If you were the leader of this youth fellowship, what is the first thing you would change or improve?"
+    description: "One or more concrete changes they would make first."

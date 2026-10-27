@@ -6,14 +6,16 @@ reviewers type the correct text from their phones.
 
 ## How sheets are triaged
 
-Each sheet is read by **two different models**. An answer goes to manual review if **any** of these hold:
+Each sheet is read by **two different models**: `gemini-4-argon` (primary) and `gemini-3.1-pro-preview` (verifier).
+These were the most accurate in a test against `gemini-pro-latest`, `gemini-3.8-flash`, and `gemini-3.5-flash`.
+The weaker models tended to silently "correct" what was written (ትናንሽ → ትንንሽ) while still reporting 98% confidence. An answer goes to manual review if **any** of these hold:
 
 | Signal | Why |
 |---|---|
 | model confidence < `MIN_CONFIDENCE` | self-reported doubt |
 | `[?word?]` / `[...]` marks in the text | model was told to mark unsure words instead of guessing |
 | model says the text doesn't make sense for the question | catches fluent-looking mis-reads |
-| the two models' readings differ (< `MIN_AGREEMENT` similarity) | the strongest signal; self-confidence alone is unreliable |
+| the two models' readings differ at all (ignoring punctuation, spacing, and same-sound letters like ሀ/ሐ/ኀ) | the strongest signal; self-confidence alone is unreliable, and one wrong Fidel letter can change the meaning |
 | unexpected characters | garbled output |
 | whole sheet hard to read, or text that couldn't be matched to a question | every answer on that sheet is reviewed |
 
