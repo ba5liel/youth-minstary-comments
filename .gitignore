@@ -5,3 +5,4 @@ data/
 exports/
 # The photos contain the youths' handwriting; keep them out of git.
 images/
+.DS_Store
